@@ -89,6 +89,38 @@ app.post('/tweets', async (req, res) => {
   }
 });
 
+app.post('/comments', async (req, res) => {
+  const { tweet_id, user_id, content } = req.body;
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO comments (tweet_id, user_id, content)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [tweet_id, user_id, content]
+    );
+    res.status(201).json(rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: 'Error al comentar' });
+  }
+});
+
+app.get('/comments/:tweet_id', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT c.id, c.content, c.created_at, u.username
+      FROM comments c
+      JOIN users u ON c.user_id = u.id
+      WHERE c.tweet_id = $1
+      ORDER BY c.created_at ASC
+    `, [req.params.tweet_id]);
+
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: 'Error al obtener comentarios' });
+  }
+});
+
 // Listar tweets (timeline)
 app.get('/tweets', async (_, res) => {
   try {

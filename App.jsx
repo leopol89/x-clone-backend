@@ -1,127 +1,169 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, Button, FlatList, StyleSheet } from 'react-native';
+import { View, Text, TextInput, Button, ScrollView } from 'react-native';
+
+const API_URL = 'https://x-clone-backend-production-0c69.up.railway.app';
 
 export default function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [user, setUser] = useState(null);
-
+  const [token, setToken] = useState('');
   const [tweetContent, setTweetContent] = useState('');
   const [tweets, setTweets] = useState([]);
 
-  const API_URL = 'https://x-clone-backend-production-0c69.up.railway.app';
-
-  // LOGIN
-  const loginUser = async () => {
+  // ===== LOGIN =====
+  const login = async () => {
     try {
       const res = await fetch(`${API_URL}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          password_hash: password
-        })
+        body: JSON.stringify({ email, password })
       });
       const data = await res.json();
-      if (data.error) {
-        alert(data.error);
+      if (data.token) {
+        setToken(data.token);
+        alert('Login exitoso!');
+        fetchTweets();
       } else {
-        setUser(data);
-        fetchTweets(); // cargar tweets al iniciar sesión
+        alert(data.error || 'Error en login');
       }
-    } catch (err) {
-      console.error(err);
+    } catch (e) {
+      console.error(e);
+      alert('Error al conectar al servidor');
     }
   };
 
-  // CREAR TWEET
-  const postTweet = async () => {
-    if (!tweetContent) return;
-    try {
-      const res = await fetch(`${API_URL}/tweets`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: user.id,
-          content: tweetContent
-        })
-      });
-      const newTweet = await res.json();
-      setTweets([newTweet, ...tweets]);
-      setTweetContent('');
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // LISTAR TWEETS
+  // ===== FETCH TWEETS =====
   const fetchTweets = async () => {
     try {
       const res = await fetch(`${API_URL}/tweets`);
       const data = await res.json();
       setTweets(data);
-    } catch (err) {
-      console.error(err);
+    } catch (e) {
+      console.error(e);
     }
   };
 
-  // RENDER TWEET ITEM
-  const renderItem = ({ item }) => (
-    <View style={styles.tweet}>
-      <Text style={styles.username}>{item.username}</Text>
-      <Text>{item.content}</Text>
-      <Text style={styles.date}>{new Date(item.created_at).toLocaleString()}</Text>
-    </View>
-  );
+  // ===== CREAR TWEET =====
+  const createTweet = async () => {
+    if (!tweetContent) return alert('Escribe algo primero');
+    try {
+      const res = await fetch(`${API_URL}/tweets`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ content: tweetContent })
+      });
+      const data = await res.json();
+      setTweetContent('');
+      fetchTweets();
+    } catch (e) {
+      console.error(e);
+      alert('Error al crear tweet');
+    }
+  };
+
+  // ===== DAR LIKE =====
+  const likeTweet = async (tweet_id) => {
+    try {
+      await fetch(`${API_URL}/likes`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ tweet_id })
+      });
+      fetchTweets();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // ===== COMENTARIOS =====
+  const [commentContent, setCommentContent] = useState({});
+  const addComment = async (tweet_id) => {
+    if (!commentContent[tweet_id]) return;
+    try {
+      await fetch(`${API_URL}/comments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          tweet_id,
+          content: commentContent[tweet_id]
+        })
+      });
+      setCommentContent({ ...commentContent, [tweet_id]: '' });
+      fetchTweets();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    if (token) fetchTweets();
+  }, [token]);
 
   return (
-    <View style={{ padding: 20, flex: 1 }}>
-      {!user ? (
-        <>
-          <Text>Email:</Text>
-          <TextInput value={email} onChangeText={setEmail} style={styles.input} />
-          <Text>Password:</Text>
-          <TextInput value={password} onChangeText={setPassword} secureTextEntry style={styles.input} />
-          <Button title="Login" onPress={loginUser} />
-        </>
-      ) : (
-        <>
-          <Text>Hola, {user.username}</Text>
+    <ScrollView style={{ padding: 20, marginTop: 50 }}>
+      {!token ? (
+        <View>
+          <Text>Login</Text>
           <TextInput
-            placeholder="Escribe un tweet..."
+            placeholder="Email"
+            value={email}
+            onChangeText={setEmail}
+            style={{ borderWidth: 1, marginBottom: 10, padding: 5 }}
+          />
+          <TextInput
+            placeholder="Password"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            style={{ borderWidth: 1, marginBottom: 10, padding: 5 }}
+          />
+          <Button title="Login" onPress={login} />
+        </View>
+      ) : (
+        <View>
+          <Text>Crear Tweet</Text>
+          <TextInput
+            placeholder="¿Qué estás pensando?"
             value={tweetContent}
             onChangeText={setTweetContent}
-            style={styles.input}
+            style={{ borderWidth: 1, marginBottom: 10, padding: 5 }}
           />
-          <Button title="Publicar Tweet" onPress={postTweet} />
+          <Button title="Tweet" onPress={createTweet} />
 
-          <Text style={{ marginVertical: 10, fontWeight: 'bold' }}>Tweets:</Text>
-          <FlatList
-            data={tweets}
-            keyExtractor={item => item.id}
-            renderItem={renderItem}
-          />
-        </>
+          <Text style={{ marginTop: 20, fontWeight: 'bold' }}>Timeline</Text>
+          {tweets.map((t) => (
+            <View
+              key={t.id}
+              style={{ borderBottomWidth: 1, borderColor: '#ccc', padding: 10 }}
+            >
+              <Text style={{ fontWeight: 'bold' }}>@{t.username}</Text>
+              <Text>{t.content}</Text>
+              <Text>❤️ {t.likes || 0}</Text>
+
+              <Button title="Like" onPress={() => likeTweet(t.id)} />
+
+              <TextInput
+                placeholder="Comenta..."
+                value={commentContent[t.id] || ''}
+                onChangeText={(text) =>
+                  setCommentContent({ ...commentContent, [t.id]: text })
+                }
+                style={{ borderWidth: 1, marginVertical: 5, padding: 5 }}
+              />
+              <Button title="Comentar" onPress={() => addComment(t.id)} />
+            </View>
+          ))}
+        </View>
       )}
-    </View>
+    </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  input: {
-    borderWidth: 1,
-    marginBottom: 10,
-    padding: 5
-  },
-  tweet: {
-    borderBottomWidth: 1,
-    paddingVertical: 5
-  },
-  username: {
-    fontWeight: 'bold'
-  },
-  date: {
-    fontSize: 10,
-    color: 'gray'
-  }
-});

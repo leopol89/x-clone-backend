@@ -1,37 +1,51 @@
 import express from 'express';
 import cors from 'cors';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcrypt';
 import { pool } from './db.js';
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
+const JWT_SECRET = process.env.JWT_SECRET || 'x_clone_secret_key';
+
 /* =========================
-   ENDPOINT DE PRUEBA
+   MIDDLEWARE AUTH
+========================= */
+const auth = (req, res, next) => {
+  const header = req.headers.authorization;
+  if (!header) return res.sendStatus(401);
+
+  const token = header.split(' ')[1];
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.sendStatus(403);
+  }
+};
+
+/* =========================
+   TEST
 ========================= */
 app.get('/', (_, res) => {
   res.send('API X Clone funcionando 🔥');
 });
 
 /* =========================
-   USUARIOS
+   USERS
 ========================= */
-
-// Registro
 app.post('/users', async (req, res) => {
-  const { username, email, password_hash } = req.body;
-
-  if (!username || !email || !password_hash) {
-    return res.status(400).json({ error: 'Faltan datos' });
-  }
+  const { username, email, password } = req.body;
 
   try {
+    const hash = await bcrypt.hash(password, 10);
     const { rows } = await pool.query(
       `INSERT INTO users (username, email, password_hash)
-       VALUES ($1, $2, $3)
+       VALUES ($1,$2,$3)
        RETURNING id, username, email`,
-      [username, email, password_hash]
+      [username, email, hash]
     );
     res.status(201).json(rows[0]);
   } catch (e) {
@@ -39,164 +53,127 @@ app.post('/users', async (req, res) => {
   }
 });
 
-// Login
+/* =========================
+   LOGIN (JWT)
+========================= */
 app.post('/login', async (req, res) => {
-  const { email, password_hash } = req.body;
+  const { email, password } = req.body;
 
-  try {
-    const { rows } = await pool.query(
-      `SELECT id, username, email, password_hash
-       FROM users WHERE email = $1`,
-      [email]
-    );
+  const { rows } = await pool.query(
+    `SELECT * FROM users WHERE email = $1`,
+    [email]
+  );
 
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
-    }
-
-    if (rows[0].password_hash !== password_hash) {
-      return res.status(401).json({ error: 'Contraseña incorrecta' });
-    }
-
-    res.json({
-      id: rows[0].id,
-      username: rows[0].username,
-      email: rows[0].email
-    });
-  } catch (e) {
-    res.status(500).json({ error: 'Error en login' });
+  if (!rows.length) {
+    return res.status(404).json({ error: 'Usuario no encontrado' });
   }
+
+  const user = rows[0];
+  const ok = await bcrypt.compare(password, user.password_hash);
+  if (!ok) return res.status(401).json({ error: 'Credenciales incorrectas' });
+
+  const token = jwt.sign(
+    { id: user.id, username: user.username },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+
+  res.json({ token });
 });
 
 /* =========================
    TWEETS
 ========================= */
+app.post('/tweets', auth, async (req, res) => {
+  const { content } = req.body;
 
-// Crear tweet
-app.post('/tweets', async (req, res) => {
-  const { user_id, content } = req.body;
-
-  try {
-    const { rows } = await pool.query(
-      `INSERT INTO tweets (user_id, content)
-       VALUES ($1, $2)
-       RETURNING *`,
-      [user_id, content]
-    );
-    res.status(201).json(rows[0]);
-  } catch (e) {
-    res.status(500).json({ error: 'Error al crear tweet' });
-  }
+  const { rows } = await pool.query(
+    `INSERT INTO tweets (user_id, content)
+     VALUES ($1,$2)
+     RETURNING *`,
+    [req.user.id, content]
+  );
+  res.status(201).json(rows[0]);
 });
 
-app.post('/comments', async (req, res) => {
-  const { tweet_id, user_id, content } = req.body;
-
-  try {
-    const { rows } = await pool.query(
-      `INSERT INTO comments (tweet_id, user_id, content)
-       VALUES ($1, $2, $3)
-       RETURNING *`,
-      [tweet_id, user_id, content]
-    );
-    res.status(201).json(rows[0]);
-  } catch (e) {
-    res.status(500).json({ error: 'Error al comentar' });
-  }
-});
-
-app.get('/comments/:tweet_id', async (req, res) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT c.id, c.content, c.created_at, u.username
-      FROM comments c
-      JOIN users u ON c.user_id = u.id
-      WHERE c.tweet_id = $1
-      ORDER BY c.created_at ASC
-    `, [req.params.tweet_id]);
-
-    res.json(rows);
-  } catch (e) {
-    res.status(500).json({ error: 'Error al obtener comentarios' });
-  }
-});
-
-// Listar tweets (timeline)
 app.get('/tweets', async (_, res) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT t.id, t.content, t.created_at, u.username
-      FROM tweets t
-      JOIN users u ON t.user_id = u.id
-      ORDER BY t.created_at DESC
-    `);
-    res.json(rows);
-  } catch (e) {
-    res.status(500).json({ error: 'Error al obtener tweets' });
-  }
+  const { rows } = await pool.query(`
+    SELECT t.id, t.content, t.created_at, u.username,
+      (SELECT COUNT(*) FROM likes l WHERE l.tweet_id = t.id) AS likes
+    FROM tweets t
+    JOIN users u ON u.id = t.user_id
+    ORDER BY t.created_at DESC
+  `);
+  res.json(rows);
 });
 
 /* =========================
    LIKES
 ========================= */
-
-// Dar like
-app.post('/likes', async (req, res) => {
-  const { user_id, tweet_id } = req.body;
+app.post('/likes', auth, async (req, res) => {
+  const { tweet_id } = req.body;
 
   try {
-    const { rows } = await pool.query(
+    await pool.query(
       `INSERT INTO likes (user_id, tweet_id)
-       VALUES ($1, $2)
-       RETURNING *`,
-      [user_id, tweet_id]
+       VALUES ($1,$2)`,
+      [req.user.id, tweet_id]
     );
-    res.status(201).json(rows[0]);
-  } catch (e) {
+    res.json({ ok: true });
+  } catch {
     res.status(400).json({ error: 'Like ya existe' });
   }
 });
 
-// Contar likes
-app.get('/likes/:tweet_id', async (req, res) => {
-  const { tweet_id } = req.params;
+/* =========================
+   COMMENTS
+========================= */
+app.post('/comments', auth, async (req, res) => {
+  const { tweet_id, content } = req.body;
 
-  try {
-    const { rows } = await pool.query(
-      `SELECT COUNT(*) FROM likes WHERE tweet_id = $1`,
-      [tweet_id]
-    );
-    res.json({ likes: Number(rows[0].count) });
-  } catch (e) {
-    res.status(500).json({ error: 'Error al contar likes' });
-  }
+  const { rows } = await pool.query(
+    `INSERT INTO comments (tweet_id, user_id, content)
+     VALUES ($1,$2,$3)
+     RETURNING *`,
+    [tweet_id, req.user.id, content]
+  );
+  res.status(201).json(rows[0]);
+});
+
+app.get('/comments/:tweet_id', async (req, res) => {
+  const { rows } = await pool.query(`
+    SELECT c.id, c.content, c.created_at, u.username
+    FROM comments c
+    JOIN users u ON u.id = c.user_id
+    WHERE c.tweet_id = $1
+    ORDER BY c.created_at ASC
+  `, [req.params.tweet_id]);
+
+  res.json(rows);
 });
 
 /* =========================
    FOLLOWERS
 ========================= */
-
-// Seguir usuario
-app.post('/followers', async (req, res) => {
-  const { follower_id, following_id } = req.body;
+app.post('/follow', auth, async (req, res) => {
+  const { user_to_follow } = req.body;
 
   try {
-    const { rows } = await pool.query(
+    await pool.query(
       `INSERT INTO followers (follower_id, following_id)
-       VALUES ($1, $2)
-       RETURNING *`,
-      [follower_id, following_id]
+       VALUES ($1,$2)`,
+      [req.user.id, user_to_follow]
     );
-    res.status(201).json(rows[0]);
-  } catch (e) {
+    res.json({ ok: true });
+  } catch {
     res.status(400).json({ error: 'Ya sigues a este usuario' });
   }
 });
 
 /* =========================
-   SERVIDOR
+   SERVER
 ========================= */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
+  console.log('Servidor X Clone activo 🚀');
 });

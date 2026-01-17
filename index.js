@@ -113,6 +113,29 @@ app.get('/tweets', async (_, res) => {
   }
 });
 
+// Dar like a un tweet
+app.post('/likes', async (req, res) => {
+  const { user_id, tweet_id } = req.body;
+
+  if (!user_id || !tweet_id) {
+    return res.status(400).json({ error: 'Faltan user_id o tweet_id' });
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO likes (user_id, tweet_id)
+       VALUES ($1, $2)
+       RETURNING *`,
+      [user_id, tweet_id]
+    );
+
+    res.status(201).json(rows[0]);
+  } catch (error) {
+    console.error('Error al dar like:', error);
+    res.status(400).json({ error: 'Like ya existe o error' });
+  }
+});
+
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {

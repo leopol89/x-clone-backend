@@ -1,14 +1,18 @@
 {
-  "name": "x-clone-backend",
-  "type": "module",
+  "name": "x-clone-mobile",
+  "version": "1.0.0",
+  "main": "App.jsx",
   "scripts": {
-    "start": "node index.js"
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "cors": "^2.8.5",
-    "pg": "^8.11.3"
-    "jsonwebtoken": "^9.0.2",
-"bcrypt": "^5.1.0"
+    "expo": "~50.1.0",
+    "react": "18.2.0",
+    "react-native": "0.72.3"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0"
   }
 }

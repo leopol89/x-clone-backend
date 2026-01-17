@@ -54,10 +54,42 @@ app.post('/login', async (req, res) => {
       username: user.username,
       email: user.email
     });
+    
 
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
+    // Crear tweet
+app.post('/tweets', async (req, res) => {
+  const { user_id, content } = req.body;
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO tweets (user_id, content) VALUES ($1, $2) RETURNING *`,
+      [user_id, content]
+    );
+    res.status(201).json(rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ error: 'Error al crear tweet' });
+  }
+});
+
+// Listar tweets
+app.get('/tweets', async (_, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT t.id, t.content, t.created_at, u.username 
+       FROM tweets t 
+       JOIN users u ON t.user_id = u.id
+       ORDER BY t.created_at DESC`
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error al obtener tweets' });
   }
 });
 

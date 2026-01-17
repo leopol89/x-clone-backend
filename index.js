@@ -136,6 +136,23 @@ app.post('/likes', async (req, res) => {
   }
 });
 
+// Contar likes de un tweet
+app.get('/likes/:tweet_id', async (req, res) => {
+  const { tweet_id } = req.params;
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT COUNT(*) FROM likes WHERE tweet_id = $1`,
+      [tweet_id]
+    );
+
+    res.json({ likes: rows[0].count });
+  } catch (error) {
+    console.error('Error al contar likes:', error);
+    res.status(500).json({ error: 'Error al obtener likes' });
+  }
+});
+
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
